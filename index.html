@@ -177,7 +177,7 @@
   </header>
   <main>
     <div id="cardList" class="loading">Chargement…</div>
-    <div class="rate-note">Actualisation automatique toutes les 40 secondes.</div>
+    <div class="rate-note">Actualisation automatique toutes les 30 secondes.</div>
   </main>
 </div>
 <div id="modalRoot"></div>
@@ -364,7 +364,7 @@
   }
   function loadComments(number){
     commentsCache[number] = "loading";
-    fetch(API + "/issues/" + number + "/comments?per_page=50&_=" + Date.now(), { cache: "no-store" })
+    fetch(WORKER_URL + "?type=comments&number=" + number + "&_=" + Date.now(), { cache: "no-store" })
       .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
       .then(function(data){
         commentsCache[number] = data;
@@ -486,7 +486,7 @@
       el("cardList").className = "loading";
       el("cardList").innerHTML = "Chargement…";
     }
-    fetch(API + "/issues?state=all&per_page=100&_=" + Date.now(), { headers: ghHeaders(), cache: "no-store" })
+    fetch(WORKER_URL + "?type=issues&_=" + Date.now(), { cache: "no-store" })
       .then(function(r){
         if(!r.ok) return r.json().then(function(j){ throw new Error(j.message || ("HTTP "+r.status)); });
         return r.json();
@@ -508,7 +508,7 @@
 
   renderWhoami();
   load(false);
-  pollTimer = setInterval(function(){ load(false); }, 40000);
+  pollTimer = setInterval(function(){ load(false); }, 30000);
 })();
 </script>
 </body>
