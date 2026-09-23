@@ -53,6 +53,12 @@
     display:inline-flex; align-items:center; gap:6px;
   }
   .btn-ghost:hover{background:var(--surface-tan);}
+  .whoami{
+    display:flex; align-items:center; gap:6px; background:var(--surface-tan); border:1px solid var(--border);
+    border-radius:999px; padding:6px 12px 6px 8px; font-size:12.5px; font-weight:600; cursor:pointer;
+  }
+  .whoami .dot{width:8px; height:8px; border-radius:50%; background:var(--accent);}
+  .whoami .dot.off{background:var(--ink-faint);}
   .searchrow{display:flex; gap:8px; margin:14px 0 10px;}
   .searchrow input[type="search"]{
     flex:1; border:1px solid var(--border-strong); background:var(--surface); color:var(--ink);
@@ -123,15 +129,33 @@
   .sheet-body ul{margin:0 0 8px; padding-left:20px;}
   .sheet-body strong{font-weight:700;}
   .gh-cta{
-    display:flex; align-items:center; justify-content:center; gap:8px; background:var(--ink); color:var(--bg);
-    border-radius:11px; padding:12px 16px; font-weight:700; font-size:14px; text-decoration:none; margin-top:16px;
+    display:flex; align-items:center; justify-content:center; gap:8px; background:transparent; color:var(--ink-muted);
+    border:1px solid var(--border-strong); border-radius:11px; padding:10px 14px; font-weight:600; font-size:13px;
+    text-decoration:none; margin-top:14px;
   }
+  .statusgrid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:6px; }
+  .statusbtn{
+    border:1.5px solid var(--border-strong); background:var(--surface); color:var(--ink);
+    border-radius:11px; padding:10px 8px; font-size:12.5px; font-weight:700; cursor:pointer; text-align:center;
+  }
+  .statusbtn.current{ border-color:var(--accent); background:var(--accent-soft); color:var(--accent-soft-ink); }
+  .statusbtn:disabled{ opacity:.5; cursor:not-allowed; }
   .toast{
     position:fixed; left:50%; bottom:24px; transform:translateX(-50%);
     background:var(--ink); color:var(--bg); padding:10px 18px; border-radius:999px; font-size:13px; font-weight:600;
-    z-index:60; box-shadow:0 6px 20px rgba(0,0,0,.25);
+    z-index:60; box-shadow:0 6px 20px rgba(0,0,0,.25); max-width:88vw; text-align:center;
   }
   .rate-note{font-size:11.5px; color:var(--ink-faint); text-align:center; padding:10px 0 0;}
+  .id-field{ margin-bottom:12px; }
+  .id-field label{ display:block; font-size:12px; font-weight:700; color:var(--ink-muted); margin-bottom:4px; }
+  .id-field input, .id-field textarea{
+    width:100%; border:1px solid var(--border-strong); background:var(--surface); color:var(--ink);
+    border-radius:10px; padding:9px 11px; font-size:14px; font-family:inherit;
+  }
+  .id-help{ font-size:12px; color:var(--ink-muted); line-height:1.5; background:var(--surface-tan); border-radius:10px; padding:10px 12px; margin-bottom:12px; }
+  .id-help a{ text-decoration:underline; }
+  .btn{ border:none; border-radius:10px; padding:10px 14px; font-size:13.5px; font-weight:700; cursor:pointer; width:100%; }
+  .btn.primary{ background:var(--accent); color:var(--accent-ink); }
 </style>
 </head>
 <body>
@@ -145,8 +169,7 @@
         </div>
       </div>
       <div class="toprow-actions">
-        <button class="btn-ghost" id="refreshBtn">↻ Actualiser</button>
-        <a class="btn-ghost" href="https://github.com/dossyne-labs/rouageb2b/issues" target="_blank" rel="noopener">Voir sur GitHub</a>
+        <div class="whoami" id="whoamiBtn"><span class="dot off" id="whoamiDot"></span><span id="whoamiName">Configurer</span></div>
       </div>
     </div>
     <div class="searchrow"><input type="search" id="searchInput" placeholder="Rechercher une entreprise, un nom…"></div>
@@ -154,6 +177,7 @@
   </header>
   <main>
     <div id="cardList" class="loading">Chargement…</div>
+    <div class="rate-note">Actualisation automatique toutes les 40 secondes.</div>
   </main>
 </div>
 <div id="modalRoot"></div>
@@ -162,7 +186,8 @@
 <script>
 (function(){
   "use strict";
-  var REPO = "dossyne-labs/rouageb2b";
+  var OWNER = "dossyne-labs", REPONAME = "rouageb2b";
+  var REPO = OWNER + "/" + REPONAME;
   var API = "https://api.github.com/repos/" + REPO;
   var STATUS_ORDER = ["a-appeler","tente","barrage","messagerie","injoignable","decideur-joint","refus","rdv-obtenu","sans-suite"];
   var STATUS_LABEL = {
@@ -183,6 +208,9 @@
   var searchQuery = "";
   var items = [];
   var el = document.getElementById.bind(document);
+  var myName = localStorage.getItem("rouage_bd_name") || "";
+  var myToken = localStorage.getItem("rouage_gh_token") || "";
+  var pollTimer = null;
 
   function esc(s){ return (s==null?"":String(s)).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
 
@@ -190,7 +218,13 @@
     var t = document.createElement("div");
     t.className = "toast"; t.textContent = msg;
     el("toastRoot").appendChild(t);
-    setTimeout(function(){ t.remove(); }, 2600);
+    setTimeout(function(){ t.remove(); }, 3200);
+  }
+
+  function ghHeaders(){
+    var h = {"Accept":"application/vnd.github+json"};
+    if(myToken) h["Authorization"] = "Bearer " + myToken;
+    return h;
   }
 
   function labelNames(issue){ return (issue.labels||[]).map(function(l){ return typeof l === "string" ? l : l.name; }); }
@@ -212,7 +246,6 @@
   }
   function hasLabel(issue, name){ return labelNames(issue).indexOf(name) !== -1; }
 
-  // tiny markdown-ish renderer for the subset we generate (###, **bold**, > quote, -, links, blank-line paragraphs)
   function renderBody(md){
     var lines = (md||"").split("\n");
     var html = [];
@@ -237,6 +270,39 @@
     return s;
   }
 
+  // ---------------- identity / token setup ----------------
+  function renderWhoami(){
+    el("whoamiName").textContent = myName ? myName : "Configurer";
+    el("whoamiDot").className = "dot" + (myToken ? "" : " off");
+  }
+  function openIdentityModal(){
+    el("modalRoot").innerHTML =
+      '<div class="overlay" id="idOvl"><div class="sheet">' +
+        '<div class="sheet-head"><h2>Configurer l’accès</h2><button class="close" id="idClose">✕</button></div>' +
+        '<div class="id-help">Pour changer un statut d’un simple clic (sans repasser par GitHub), il te faut ton propre <b>jeton d’accès GitHub</b> — gratuit, personnel, à créer une seule fois.<br><br>' +
+          '1. Ouvre <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com → Fine-grained tokens</a><br>' +
+          '2. Repository access → Only select repositories → <b>dossyne-labs/rouageb2b</b><br>' +
+          '3. Permissions → <b>Issues : Read and write</b><br>' +
+          '4. Generate, puis colle le jeton ci-dessous. Il reste uniquement sur ton appareil.</div>' +
+        '<div class="id-field"><label>Ton prénom</label><input type="text" id="idName" value="'+esc(myName)+'" placeholder="Ex. Mehdi"></div>' +
+        '<div class="id-field"><label>Ton jeton GitHub (github_pat_…)</label><input type="text" id="idToken" value="'+esc(myToken)+'" placeholder="github_pat_..."></div>' +
+        '<button class="btn primary" id="idSave">Enregistrer</button>' +
+      '</div></div>';
+    el("idClose").onclick = function(){ el("modalRoot").innerHTML=""; };
+    el("idSave").onclick = function(){
+      myName = el("idName").value.trim();
+      myToken = el("idToken").value.trim();
+      localStorage.setItem("rouage_bd_name", myName);
+      localStorage.setItem("rouage_gh_token", myToken);
+      renderWhoami();
+      el("modalRoot").innerHTML = "";
+      toast("Configuration enregistrée");
+      load(false);
+    };
+  }
+  el("whoamiBtn").onclick = openIdentityModal;
+
+  // ---------------- list rendering ----------------
   function renderChips(){
     var counts = {};
     FILTERS.forEach(function(f){ counts[f.key] = itemsForFilter(f.key).length; });
@@ -290,7 +356,7 @@
           '</div>' +
           (flags ? '<div class="flagrow">'+flags+'</div>' : '') +
           '<div class="card-bottom"><span class="pill st-'+st+'">'+esc(STATUS_LABEL[st]||st)+'</span>' +
-            '<span class="meta">#'+it.number+' · '+ (it.comments||0) +' commentaire'+(it.comments===1?'':'s')+'</span></div>' +
+            '<span class="meta">#'+it.number+'</span></div>' +
         '</div>';
     }).join("");
     Array.prototype.forEach.call(container.querySelectorAll(".card"), function(c){
@@ -298,44 +364,101 @@
     });
   }
 
+  var openNumber = null;
   function openFiche(number){
-    var it = items.filter(function(x){ return x.number===number; })[0];
-    if(!it) return;
+    openNumber = number;
+    renderFiche();
+  }
+  function renderFiche(){
+    var it = items.filter(function(x){ return x.number===openNumber; })[0];
+    if(!it){ el("modalRoot").innerHTML=""; return; }
     var st = getStatus(it), pr = getPrio(it);
+    var statusButtons = STATUS_ORDER.map(function(key){
+      return '<button class="statusbtn'+(st===key?' current':'')+'" data-status="'+key+'">'+esc(STATUS_LABEL[key])+'</button>';
+    }).join("");
     el("modalRoot").innerHTML =
       '<div class="overlay" id="ovl"><div class="sheet">' +
         '<div class="sheet-head"><h2>'+esc(it.title)+'</h2><button class="close" id="closeBtn">✕</button></div>' +
         '<div class="badges" style="margin-bottom:12px;"><span class="badge pr-'+esc(pr)+'">'+esc(pr)+'</span> <span class="pill st-'+st+'">'+esc(STATUS_LABEL[st]||st)+'</span></div>' +
         '<div class="sheet-body">' + renderBody(it.body) + '</div>' +
-        '<a class="gh-cta" href="'+it.html_url+'" target="_blank" rel="noopener">Ouvrir sur GitHub pour mettre à jour →</a>' +
+        '<div class="section-title" style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-faint);margin:16px 0 8px;">Changer le statut</div>' +
+        '<div class="statusgrid">' + statusButtons + '</div>' +
+        '<a class="gh-cta" href="'+it.html_url+'" target="_blank" rel="noopener">Voir l’historique complet sur GitHub →</a>' +
       '</div></div>';
-    el("closeBtn").onclick = function(){ el("modalRoot").innerHTML=""; };
-    el("ovl").onclick = function(e){ if(e.target.id==="ovl") el("modalRoot").innerHTML=""; };
+    el("closeBtn").onclick = function(){ openNumber=null; el("modalRoot").innerHTML=""; };
+    el("ovl").onclick = function(e){ if(e.target.id==="ovl"){ openNumber=null; el("modalRoot").innerHTML=""; } };
+    Array.prototype.forEach.call(document.querySelectorAll(".statusbtn"), function(b){
+      b.onclick = function(){ changeStatus(it, b.getAttribute("data-status")); };
+    });
+  }
+
+  function changeStatus(it, newStatus){
+    if(!myToken){ openIdentityModal(); return; }
+    var oldStatus = getStatus(it);
+    if(oldStatus === newStatus) return;
+    var keepLabels = labelNames(it).filter(function(n){ return !/^statut:\s*/.test(n); });
+    var newLabels = keepLabels.concat(["statut: " + newStatus]);
+    // optimistic update
+    it.labels = newLabels.map(function(n){ return {name:n}; });
+    renderFiche(); renderChips(); renderList();
+    fetch(API + "/issues/" + it.number, {
+      method: "PATCH",
+      headers: Object.assign({"Content-Type":"application/json"}, ghHeaders()),
+      body: JSON.stringify({ labels: newLabels })
+    }).then(function(r){
+      if(!r.ok) return r.json().then(function(j){ throw new Error(j.message || ("HTTP "+r.status)); });
+      toast("Statut enregistré — " + STATUS_LABEL[newStatus]);
+      if(myName){
+        fetch(API + "/issues/" + it.number + "/comments", {
+          method: "POST",
+          headers: Object.assign({"Content-Type":"application/json"}, ghHeaders()),
+          body: JSON.stringify({ body: "**Statut → " + STATUS_LABEL[newStatus] + "** — par " + myName })
+        }).catch(function(){});
+      }
+    }).catch(function(e){
+      // revert
+      it.labels = labelNames(it).filter(function(n){ return !/^statut:\s*/.test(n) || n === "statut: " + oldStatus; }).map(function(n){return {name:n};});
+      if(!hasLabel(it, "statut: " + oldStatus)) it.labels.push({name:"statut: " + oldStatus});
+      renderFiche(); renderChips(); renderList();
+      var msg = e.message || "";
+      if(/rate limit/i.test(msg)){
+        toast("Limite GitHub atteinte, réessaie dans une minute.");
+      } else {
+        toast("Échec — vérifie ton jeton (droits Issues) ou demande l'accès collaborateur à Nicolas.");
+      }
+    });
   }
 
   el("searchInput").oninput = function(e){ searchQuery = e.target.value; renderList(); };
-  el("refreshBtn").onclick = function(){ load(true); };
 
   function load(manual){
-    el("cardList").className = "loading";
-    el("cardList").innerHTML = "Chargement…";
-    fetch(API + "/issues?state=all&per_page=100")
+    if(items.length === 0){
+      el("cardList").className = "loading";
+      el("cardList").innerHTML = "Chargement…";
+    }
+    fetch(API + "/issues?state=all&per_page=100", { headers: ghHeaders() })
       .then(function(r){
-        if(!r.ok){ throw new Error("HTTP "+r.status); }
+        if(!r.ok) return r.json().then(function(j){ throw new Error(j.message || ("HTTP "+r.status)); });
         return r.json();
       })
       .then(function(data){
         items = data.filter(function(d){ return !d.pull_request; });
         renderChips();
         renderList();
+        if(openNumber != null) renderFiche();
         if(manual) toast("Actualisé — " + items.length + " fiches");
       })
       .catch(function(e){
-        el("cardList").className = "empty";
-        el("cardList").innerHTML = "Impossible de charger les fiches depuis GitHub (" + esc(e.message) + ").<br>Réessaie dans une minute (l'API GitHub limite les appels non connectés).";
+        if(items.length === 0){
+          el("cardList").className = "empty";
+          el("cardList").innerHTML = "Impossible de charger les fiches depuis GitHub (" + esc(e.message) + ").";
+        }
       });
   }
+
+  renderWhoami();
   load(false);
+  pollTimer = setInterval(function(){ load(false); }, 40000);
 })();
 </script>
 </body>
