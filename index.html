@@ -495,7 +495,11 @@
         items = data.filter(function(d){ return !d.pull_request; });
         renderChips();
         renderList();
-        if(openNumber != null) renderFiche();
+        if(openNumber != null){
+          var _ta = el("noteInput");
+          var _typing = _ta && document.activeElement === _ta;
+          if(!_typing) renderFiche();
+        }
         if(manual) toast("Actualisé — " + items.length + " fiches");
       })
       .catch(function(e){
