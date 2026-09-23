@@ -209,7 +209,7 @@
   var items = [];
   var el = document.getElementById.bind(document);
   var myName = localStorage.getItem("rouage_bd_name") || "";
-  var myToken = localStorage.getItem("rouage_gh_token") || "";
+  var WORKER_URL = "https://fancy-dew-949b.nicolas-imbert-provence.workers.dev/";
   var pollTimer = null;
 
   function esc(s){ return (s==null?"":String(s)).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
@@ -222,9 +222,7 @@
   }
 
   function ghHeaders(){
-    var h = {"Accept":"application/vnd.github+json"};
-    if(myToken) h["Authorization"] = "Bearer " + myToken;
-    return h;
+    return {"Accept":"application/vnd.github+json"};
   }
 
   function labelNames(issue){ return (issue.labels||[]).map(function(l){ return typeof l === "string" ? l : l.name; }); }
@@ -272,33 +270,26 @@
 
   // ---------------- identity / token setup ----------------
   function renderWhoami(){
-    el("whoamiName").textContent = myName ? myName : "Configurer";
-    el("whoamiDot").className = "dot" + (myToken ? "" : " off");
+    el("whoamiName").textContent = myName ? myName : "Qui es-tu ?";
+    el("whoamiDot").className = "dot" + (myName ? "" : " off");
   }
   function openIdentityModal(){
     el("modalRoot").innerHTML =
       '<div class="overlay" id="idOvl"><div class="sheet">' +
-        '<div class="sheet-head"><h2>Configurer l’accès</h2><button class="close" id="idClose">✕</button></div>' +
-        '<div class="id-help">Pour changer un statut d’un simple clic (sans repasser par GitHub), il te faut ton propre <b>jeton d’accès GitHub</b> — gratuit, personnel, à créer une seule fois.<br><br>' +
-          '1. Ouvre <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com → Fine-grained tokens</a><br>' +
-          '2. Repository access → Only select repositories → <b>dossyne-labs/rouageb2b</b><br>' +
-          '3. Permissions → <b>Issues : Read and write</b><br>' +
-          '4. Generate, puis colle le jeton ci-dessous. Il reste uniquement sur ton appareil.</div>' +
+        '<div class="sheet-head"><h2>Qui es-tu&nbsp;?</h2><button class="close" id="idClose">✕</button></div>' +
+        '<div class="id-help">Ton prénom sert juste à savoir qui a mis à jour quoi dans l’historique.</div>' +
         '<div class="id-field"><label>Ton prénom</label><input type="text" id="idName" value="'+esc(myName)+'" placeholder="Ex. Mehdi"></div>' +
-        '<div class="id-field"><label>Ton jeton GitHub (github_pat_…)</label><input type="text" id="idToken" value="'+esc(myToken)+'" placeholder="github_pat_..."></div>' +
-        '<button class="btn primary" id="idSave">Enregistrer</button>' +
+        '<button class="btn primary" id="idSave">Continuer</button>' +
       '</div></div>';
-    el("idClose").onclick = function(){ el("modalRoot").innerHTML=""; };
+    el("idClose").onclick = function(){ if(myName) el("modalRoot").innerHTML=""; };
     el("idSave").onclick = function(){
       myName = el("idName").value.trim();
-      myToken = el("idToken").value.trim();
       localStorage.setItem("rouage_bd_name", myName);
-      localStorage.setItem("rouage_gh_token", myToken);
       renderWhoami();
       el("modalRoot").innerHTML = "";
-      toast("Configuration enregistrée");
-      load(false);
+      if(myName) toast("Bonjour " + myName);
     };
+    el("idName").onkeydown = function(e){ if(e.key==="Enter"){ el("idSave").click(); } };
   }
   el("whoamiBtn").onclick = openIdentityModal;
 
@@ -393,7 +384,7 @@
   }
 
   function changeStatus(it, newStatus){
-    if(!myToken){ openIdentityModal(); return; }
+    if(!myName){ openIdentityModal(); return; }
     var oldStatus = getStatus(it);
     if(oldStatus === newStatus) return;
     var keepLabels = labelNames(it).filter(function(n){ return !/^statut:\s*/.test(n); });
@@ -401,31 +392,19 @@
     // optimistic update
     it.labels = newLabels.map(function(n){ return {name:n}; });
     renderFiche(); renderChips(); renderList();
-    fetch(API + "/issues/" + it.number, {
-      method: "PATCH",
-      headers: Object.assign({"Content-Type":"application/json"}, ghHeaders()),
-      body: JSON.stringify({ labels: newLabels })
+    fetch(WORKER_URL, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ issue_number: it.number, status: newStatus, name: myName, keep_labels: keepLabels })
     }).then(function(r){
-      if(!r.ok) return r.json().then(function(j){ throw new Error(j.message || ("HTTP "+r.status)); });
+      if(!r.ok) return r.json().then(function(j){ throw new Error(j.error || ("HTTP "+r.status)); });
       toast("Statut enregistré — " + STATUS_LABEL[newStatus]);
-      if(myName){
-        fetch(API + "/issues/" + it.number + "/comments", {
-          method: "POST",
-          headers: Object.assign({"Content-Type":"application/json"}, ghHeaders()),
-          body: JSON.stringify({ body: "**Statut → " + STATUS_LABEL[newStatus] + "** — par " + myName })
-        }).catch(function(){});
-      }
     }).catch(function(e){
       // revert
       it.labels = labelNames(it).filter(function(n){ return !/^statut:\s*/.test(n) || n === "statut: " + oldStatus; }).map(function(n){return {name:n};});
       if(!hasLabel(it, "statut: " + oldStatus)) it.labels.push({name:"statut: " + oldStatus});
       renderFiche(); renderChips(); renderList();
-      var msg = e.message || "";
-      if(/rate limit/i.test(msg)){
-        toast("Limite GitHub atteinte, réessaie dans une minute.");
-      } else {
-        toast("Échec — vérifie ton jeton (droits Issues) ou demande l'accès collaborateur à Nicolas.");
-      }
+      toast("Échec de l'enregistrement, réessaie.");
     });
   }
 
