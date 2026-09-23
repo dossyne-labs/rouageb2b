@@ -356,9 +356,49 @@
   }
 
   var openNumber = null;
+  var commentsCache = {}; // number -> array | "loading" | "error"
   function openFiche(number){
     openNumber = number;
     renderFiche();
+    loadComments(number);
+  }
+  function loadComments(number){
+    commentsCache[number] = "loading";
+    fetch(API + "/issues/" + number + "/comments?per_page=50&_=" + Date.now(), { cache: "no-store" })
+      .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+      .then(function(data){
+        commentsCache[number] = data;
+        if(openNumber === number) renderFiche();
+      })
+      .catch(function(){
+        commentsCache[number] = "error";
+        if(openNumber === number) renderFiche();
+      });
+  }
+  function renderNotesSection(it){
+    var c = commentsCache[it.number];
+    var listHtml;
+    if(c === "loading" || c === undefined){
+      listHtml = '<div class="meta" style="padding:6px 0;">Chargement des notes…</div>';
+    } else if(c === "error"){
+      listHtml = '<div class="meta" style="padding:6px 0;">Impossible de charger les notes.</div>';
+    } else if(c.length === 0){
+      listHtml = '<div class="meta" style="padding:6px 0;">Aucune note pour l’instant.</div>';
+    } else {
+      listHtml = c.slice().reverse().map(function(cm){
+        var d = new Date(cm.created_at);
+        var dstr = d.toLocaleDateString("fr-FR") + " " + d.toLocaleTimeString("fr-FR", {hour:"2-digit", minute:"2-digit"});
+        return '<div style="border-top:1px solid var(--border); padding:9px 0; font-size:13px;">' +
+          '<div style="color:var(--ink-faint); font-size:11.5px; margin-bottom:3px;">'+esc(dstr)+'</div>' +
+          '<div>'+renderBody(cm.body)+'</div>' +
+        '</div>';
+      }).join("");
+    }
+    return '' +
+      '<div class="section-title" style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-faint);margin:16px 0 8px;">Notes</div>' +
+      '<textarea id="noteInput" placeholder="Ajouter une note (ce qui a été dit, une date de relance…)" style="width:100%;min-height:64px;border:1px solid var(--border-strong);background:var(--surface);color:var(--ink);border-radius:10px;padding:9px 11px;font-size:13.5px;font-family:inherit;resize:vertical;"></textarea>' +
+      '<button class="btn primary" id="addNoteBtn" style="margin-top:8px;">Ajouter la note</button>' +
+      '<div id="notesList">' + listHtml + '</div>';
   }
   function renderFiche(){
     var it = items.filter(function(x){ return x.number===openNumber; })[0];
@@ -374,12 +414,42 @@
         '<div class="sheet-body">' + renderBody(it.body) + '</div>' +
         '<div class="section-title" style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-faint);margin:16px 0 8px;">Changer le statut</div>' +
         '<div class="statusgrid">' + statusButtons + '</div>' +
-        '<a class="gh-cta" href="'+it.html_url+'" target="_blank" rel="noopener">Voir l’historique complet sur GitHub →</a>' +
+        renderNotesSection(it) +
+        '<a class="gh-cta" href="'+it.html_url+'" target="_blank" rel="noopener">Voir sur GitHub →</a>' +
       '</div></div>';
     el("closeBtn").onclick = function(){ openNumber=null; el("modalRoot").innerHTML=""; };
     el("ovl").onclick = function(e){ if(e.target.id==="ovl"){ openNumber=null; el("modalRoot").innerHTML=""; } };
     Array.prototype.forEach.call(document.querySelectorAll(".statusbtn"), function(b){
       b.onclick = function(){ changeStatus(it, b.getAttribute("data-status")); };
+    });
+    el("addNoteBtn").onclick = function(){ addNote(it); };
+  }
+
+  function addNote(it){
+    if(!myName){ openIdentityModal(); return; }
+    var ta = el("noteInput");
+    var text = ta ? ta.value.trim() : "";
+    if(!text) return;
+    var btn = el("addNoteBtn");
+    btn.disabled = true; btn.textContent = "Enregistrement…";
+    fetch(WORKER_URL, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ action: "note", issue_number: it.number, name: myName, note: text })
+    }).then(function(r){
+      if(!r.ok) return r.json().then(function(j){ throw new Error(j.error || ("HTTP "+r.status)); });
+      toast("Note enregistrée");
+      if(Array.isArray(commentsCache[it.number])){
+        commentsCache[it.number] = commentsCache[it.number].concat([{
+          body: (myName ? "**Note** — par " + myName + "\n\n" : "**Note**\n\n") + text,
+          created_at: new Date().toISOString()
+        }]);
+      }
+      if(openNumber === it.number) renderFiche();
+      loadComments(it.number);
+    }).catch(function(){
+      toast("Échec de l'enregistrement, réessaie.");
+      if(btn){ btn.disabled = false; btn.textContent = "Ajouter la note"; }
     });
   }
 
@@ -395,10 +465,11 @@
     fetch(WORKER_URL, {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ issue_number: it.number, status: newStatus, name: myName, keep_labels: keepLabels })
+      body: JSON.stringify({ action: "status", issue_number: it.number, status: newStatus, name: myName, keep_labels: keepLabels })
     }).then(function(r){
       if(!r.ok) return r.json().then(function(j){ throw new Error(j.error || ("HTTP "+r.status)); });
       toast("Statut enregistré — " + STATUS_LABEL[newStatus]);
+      loadComments(it.number);
     }).catch(function(e){
       // revert
       it.labels = labelNames(it).filter(function(n){ return !/^statut:\s*/.test(n) || n === "statut: " + oldStatus; }).map(function(n){return {name:n};});
